@@ -1,0 +1,55 @@
+name: Mirror qist/tvbox
+
+on:
+  schedule:
+    # 上游 run.yml 实际常在 UTC 14:xx 前后完成更新，这里在其后镜像
+    - cron: '30 15 * * *'
+    - cron: '30 23 * * *'
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - '.github/workflows/sync-upstream.yml'
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: mirror-qist-tvbox
+  cancel-in-progress: false
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout fork
+        uses: actions/checkout@v4
+        with:
+          ref: master
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Disable local run.yml to stop local source generation
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/run.yml/disable" || echo "disable skipped"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Mirror upstream into master
+        run: |
+          cp .github/workflows/sync-upstream.yml /tmp/sync-upstream.yml
+          git fetch https://github.com/qist/tvbox.git master
+          git reset --hard FETCH_HEAD
+          mkdir -p .github/workflows
+          cp /tmp/sync-upstream.yml .github/workflows/sync-upstream.yml
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Already up to date."
+          else
+            git commit -m "Mirror qist/tvbox $(date -u +%Y%m%d%H%M)"
+            git push --force origin HEAD:master
+          fi
